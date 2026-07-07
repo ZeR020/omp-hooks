@@ -5,77 +5,47 @@
 [![npm version](https://img.shields.io/npm/v/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
 [![npm downloads](https://img.shields.io/npm/dm/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
 [![GitHub release](https://img.shields.io/github/v/release/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/releases)
-[![License: MIT](https://img.shields.io/github/license/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/stargazers)
 [![CI](https://img.shields.io/github/actions/workflow/status/ZeR020/omp-hooks/ci.yml?branch=main&style=flat-square)](https://github.com/ZeR020/omp-hooks/actions/workflows/ci.yml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat-square)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/github/license/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/blob/main/LICENSE)
 
-Claude Code-compatible command hooks for the OMP (Oh My Pi) coding agent.
+Claude Code-style command hooks for OMP (Oh My Pi).
 
 </div>
 
 ---
 
-This package adapts Claude Code's hook configuration format to OMP's extension event system so existing command hook workflows can be reused with minimal changes. It is a native OMP plugin — it depends on `@oh-my-pi/pi-coding-agent` directly and reads its hook config from `~/.omp/agent/settings.json` (or `<cwd>/.omp/settings.json`), so it no longer collides with a real Pi install.
+`omp-hooks` lets OMP run Claude Code-style `settings.json` command hooks.
+It is useful when a Claude-native tool already writes hook config, but OMP only
+loads its MCP/skills/extension surfaces and does not execute Claude hook arrays.
 
-## Why
+OMP already has native extensions and hook APIs. Use those when you are writing a
+new OMP-only plugin. Use `omp-hooks` when you want to reuse Claude Code command
+hook workflows such as `PreToolUse`, `SessionStart`, or `Stop` scripts.
 
-OMP's native `tool_call` handler can **block** a tool, but it **cannot inject hidden context** into the LLM before a tool runs. This means tools like [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) that rely on Claude Code's PreToolUse hooks to augment search results with graph context can't work on OMP out of the box.
-
-omp-hooks bridges that gap. It reads Claude Code's hooks config format and wires it into OMP's extension events — firing shell commands on tool/session events and injecting their output as hidden context the LLM sees alongside normal tool results.
-
-## Features
-
-- **9 Claude Code command-hook events mapped** — SessionStart, SessionEnd, PreCompact, PostCompact, PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, Stop
-- **Hidden context injection** — hook command output is injected into the LLM via `sendMessage({ display: false })`, the mechanism OMP's native `tool_call` lacks
-- **Claude Code command config compatibility** — supports shell form (`command`) and exec form (`command` + `args`), `timeout`, `async`, `asyncRewake`, `shell`, and tool-event `if`
-- **Settings from `~/.omp/agent/settings.json`** — env-overridable via `OMP_HOOKS_SETTINGS`, plus project-local `<cwd>/.omp/settings.json` (merged)
-- **Debounce buffer** — parallel `grep`/`glob` calls are collapsed into one combined injection (50ms window) to avoid tripping OMP's stale-guard
-- **Claude-style tool names** — OMP tool names such as `bash`/`write` are exposed to hook scripts and matchers as `Bash`/`Write`, while existing lowercase matchers still work
-
-## Installation
-
-### Option 1: Install from npm (recommended)
+## Install
 
 ```bash
 omp install omp-hooks
 ```
 
-That's it. omp-hooks is now installed and active. Restart OMP (or run `/reload`) to load it.
+Then restart OMP or run `/reload`.
 
-### Option 2: Install from GitHub
+### Install from GitHub
 
 ```bash
 omp install git:github.com/ZeR020/omp-hooks
 ```
 
-### Option 3: Let your agent install it for you
-
-Paste this into your OMP session:
-
-```
-Install the omp-hooks plugin from https://github.com/ZeR020/omp-hooks
-```
-
-Your agent will run the install command and walk you through configuring your first hook.
-
-### Option 4: From source (for development)
+### Local development
 
 ```bash
 git clone https://github.com/ZeR020/omp-hooks.git
-omp plugin link omp-hooks
+omp plugin link ./omp-hooks
 ```
 
-### Updating
+## Quick start
 
-```bash
-omp plugin upgrade omp-hooks
-```
-
-
-### After install: add your first hook
-
-omp-hooks reads hook config from `~/.omp/agent/settings.json` (global) or `.omp/settings.json` in your project (project-local, merged on top of global). The format matches Claude Code's `settings.json` hooks structure:
+Create `~/.omp/agent/settings.json`:
 
 ```json
 {
@@ -94,103 +64,114 @@ omp-hooks reads hook config from `~/.omp/agent/settings.json` (global) or `.omp/
 }
 ```
 
-Restart OMP (or run `/reload`), then send a message — when the agent finishes responding, your `echo` command runs and its output is injected as hidden context.
+Restart OMP. When the agent finishes a response, the command runs and stdout is
+injected as hidden context for the model.
 
-## Current Support
+Project-local config is also supported at:
 
-omp-hooks supports the command-hook subset of Claude Code hooks:
-
-- Supported handler type: `type: "command"`
-- Supported command fields:
-  - `command`
-  - `args`
-  - `timeout`
-  - `shell`
-  - `async`
-  - `asyncRewake`
-  - `if` on tool events only
-- Supported events:
-  - `SessionStart`
-  - `SessionEnd`
-  - `PreCompact`
-  - `PostCompact`
-  - `PreToolUse`
-  - `PostToolUse`
-  - `PostToolUseFailure`
-  - `UserPromptSubmit`
-  - `Stop`
-- Not supported yet: handler types `http`, `prompt`, `agent`, `mcp_tool`
-- Not supported yet: Claude events outside the list above, including `PostToolBatch`, `PermissionRequest`, `PermissionDenied`, `Notification`, `MessageDisplay`, `SubagentStart`, `SubagentStop`, and `StopFailure`
-
-## Event Mapping
-
-- `SessionStart.startup` → `session_start`
-- `SessionStart.resume` → `session_before_switch(reason="resume")`
-- `SessionStart.compact` → `session_compact`
-- `SessionEnd.other` → `session_shutdown`
-- `Stop` → `agent_end` (best-effort emulation of Claude Code's “after response completes” behavior)
-
-## Configuration Format
-
-Configure hooks in `~/.omp/agent/settings.json` or `.omp/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session started'"
-          }
-        ]
-      },
-      {
-        "matcher": "resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session resumed'"
-          }
-        ]
-      },
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Context compacted'"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session ended on shutdown/exit'"
-          }
-        ]
-      }
-    ]
-  }
-}
+```text
+<project>/.omp/settings.json
 ```
 
-## `matcher` Behavior
+Project config is merged over global config. Override the settings path with:
 
-`matcher` follows Claude Code's current exact/list/regex behavior:
+```bash
+OMP_HOOKS_SETTINGS=/path/to/settings.json
+```
 
-- Omitted `matcher` means match everything
-- `""` means match everything
-- `"*"` means match everything
-- Plain names are exact matches, for example `"Bash"`
-- Pipe or comma lists are exact alternatives, for example `"Edit|Write"` or `"Edit, Write"`
-- Values with regex syntax are treated as JavaScript regexes, for example `"mcp__.*"`
-Example:
+## What this solves
+
+Claude Code hooks are configured as JSON command handlers. OMP's native
+extension API can block tools and send custom context, but it does not execute
+Claude `settings.json` hook arrays directly. `omp-hooks` bridges that gap:
+
+```text
+Claude-style hook config
+        ↓
+omp-hooks
+        ↓
+OMP extension events
+        ↓
+command stdout → hidden model context
+```
+
+This is especially useful for tools that augment context before tool calls, such
+as code graph or skill-discovery helpers.
+
+## Supported Claude hook subset
+
+`omp-hooks` intentionally supports the command-hook subset. It does not try to
+implement every Claude Code hook feature.
+
+### Handler type
+
+| Claude handler type | Status |
+| --- | --- |
+| `command` | Supported |
+| `http` | Not supported |
+| `prompt` | Not supported |
+| `agent` | Not supported |
+| `mcp_tool` | Not supported |
+
+### Command fields
+
+| Field | Status | Notes |
+| --- | --- | --- |
+| `command` | Supported | Shell form by default. |
+| `args` | Supported | Exec form; no shell when present. |
+| `timeout` | Supported | Seconds. |
+| `shell` | Supported | `bash` by default; `powershell` supported for shell form. |
+| `async` | Supported | Runs in the background. Blocking decisions are ignored. |
+| `asyncRewake` | Best effort | Exit code 2 injects a hidden reminder and asks OMP to start another turn. |
+| `if` | Tool events only | Supports `ToolName(pattern)` with `*` wildcards. |
+
+### Events
+
+| Claude event | OMP event | Status |
+| --- | --- | --- |
+| `SessionStart.startup` | `session_start` | Supported |
+| `SessionStart.resume` | `session_before_switch(reason="resume")` | Supported |
+| `SessionStart.compact` | `session_compact` | Supported |
+| `SessionEnd.other` | `session_shutdown` | Supported |
+| `PreCompact` | `session_before_compact` | Supported |
+| `PostCompact` | `session_compact` | Supported |
+| `PreToolUse` | `tool_call` | Supported |
+| `PostToolUse` | `tool_result` success | Supported |
+| `PostToolUseFailure` | `tool_result` error | Supported |
+| `UserPromptSubmit` | `input` / before-agent injection | Supported |
+| `Stop` | `agent_end` | Best effort |
+
+Not supported yet: `PostToolBatch`, `PermissionRequest`, `PermissionDenied`,
+`Notification`, `MessageDisplay`, `SubagentStart`, `SubagentStop`, `StopFailure`,
+and newer Claude events that have no direct OMP mapping yet.
+
+## Matchers
+
+`matcher` follows Claude Code-style matching:
+
+- omitted, `""`, or `"*"` → match all
+- plain names → exact match, for example `"Bash"`
+- pipe/comma lists → exact alternatives, for example `"Edit|Write"` or `"Edit, Write"`
+- regex syntax → JavaScript regex, for example `"mcp__.*"`
+
+OMP raw tool names are normalized to Claude-style tool names before matching:
+
+| OMP | Hook payload / matcher |
+| --- | --- |
+| `bash` | `Bash` |
+| `read` | `Read` |
+| `write` | `Write` |
+| `edit` | `Edit` |
+| `grep` | `Grep` |
+| `glob` | `Glob` |
+| `ls` | `LS` |
+| `mcp__...` | unchanged |
+
+Lowercase matchers such as `"bash"` still work for existing configs.
+
+## Examples
+
+### Run a command before Bash tools
 
 ```json
 {
@@ -201,16 +182,7 @@ Example:
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'bash only'"
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'write or edit'"
+            "command": "echo 'bash is about to run'"
           }
         ]
       }
@@ -219,70 +191,9 @@ Example:
 }
 ```
 
-Event-specific matching fields:
+### Block `git push`
 
-### SessionStart
-
-Matches `source`:
-
-- `startup`
-- `resume`
-- `compact`
-
-### SessionEnd
-
-Matches `reason`:
-
-- `other`
-
-### PreToolUse / PostToolUse / PostToolUseFailure
-
-Matches Claude-style `tool_name`. OMP raw tool names are normalized for Claude Code config compatibility:
-
-- OMP `bash` → Claude `Bash`
-- OMP `read` → Claude `Read`
-- OMP `write` → Claude `Write`
-- OMP `edit` → Claude `Edit`
-- OMP `grep` → Claude `Grep`
-- OMP `glob` → Claude `Glob`
-- OMP `ls` → Claude `LS`
-- OMP `mcp__...` names remain unchanged
-
-Existing lowercase matchers such as `"bash"` still work.
-Notes:
-
-- `SessionEnd` is triggered from `session_shutdown`
-- When `matcher` is omitted, it defaults to `other` for `SessionEnd`
-- `UserPromptSubmit` and `Stop` do not support `matcher`; if provided, it is ignored
-
-## `if` Conditions
-
-Following Claude Code's approach, `if` is configured on each individual hook handler and only works for tool events:
-
-- `PreToolUse`
-- `PostToolUse`
-- `PostToolUseFailure`
-
-If `if` is set on other event types, that hook will not run.
-
-Currently supported forms:
-
-- `Bash(git *)`
-- `bash(git *)`
-- `Edit(*.ts)`
-- `Write(*.md)`
-- `mcp__memory__create_entities(*)`
-
-Rules:
-
-- `if` syntax is `ToolName(pattern)`
-- `ToolName` is compared case-insensitively
-- `pattern` uses simple wildcard matching where `*` means any string
-- `bash` mainly matches `tool_input.command`
-- `read`, `write`, and `edit` mainly match `tool_input.path` (or `file_path`)
-- Other tools first try common primary fields, then fall back to the JSON string of `tool_input`
-
-Example: block only `git push`
+Exit code `2` blocks synchronous tool hooks. Stderr becomes the reason.
 
 ```json
 {
@@ -294,7 +205,7 @@ Example: block only `git push`
           {
             "type": "command",
             "if": "Bash(git push*)",
-            "command": "printf '%s\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"git push is blocked\"}}'"
+            "command": "echo 'git push is blocked from this agent' >&2; exit 2"
           }
         ]
       }
@@ -303,337 +214,99 @@ Example: block only `git push`
 }
 ```
 
-## Command Handler Fields
-
-Supported `type: "command"` fields:
-
-| Field | Status | Notes |
-| --- | --- | --- |
-| `command` | supported | Shell form by default; run through `bash -c` unless `args` is present. |
-| `args` | supported | Exec form; `command` is spawned directly with `args` and no shell. |
-| `timeout` | supported | Seconds. Defaults to 600 seconds for command hooks, 30 seconds for `UserPromptSubmit`, and 1.5 seconds for `SessionEnd`. |
-| `shell` | supported | `"bash"` by default; `"powershell"` runs `powershell -NoProfile -Command ...`. Ignored when `args` is present. |
-| `async` | supported | Runs in the background; decision/blocking fields are ignored because the triggering event has already continued. JSON `additionalContext` is injected when the process exits. |
-| `asyncRewake` | supported | Implies async; exit code 2 injects stderr/stdout as a hidden reminder and asks OMP to start another turn. |
-| `if` | supported for tool events | `ToolName(pattern)` with case-insensitive tool name and `*` wildcard matching against the primary tool input field. |
-
-## Hook Input
-
-Input fields are designed to be as close as possible to Claude Code hooks:
-
-- Common fields: `session_id`, `transcript_path`, `cwd`, `hook_event_name`
-- Event-specific fields such as `source`, `reason`, `tool_name`, `tool_input`, `tool_response`
-- **OMP-specific extra fields may also be included**, but they should not break Claude Code-style scripts
-
-### SessionStart
+### Use exec form with `args`
 
 ```json
 {
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "SessionStart",
-  "source": "startup"
-}
-```
-
-### SessionEnd
-
-```json
-{
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "SessionEnd",
-  "reason": "other"
-}
-```
-
-### UserPromptSubmit
-
-```json
-{
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "UserPromptSubmit",
-  "prompt": "Write a function to calculate the factorial of a number"
-}
-```
-
-Notes:
-
-- `UserPromptSubmit` does not support `matcher`; if configured, it is ignored
-- It runs after the user submits input and before the agent loop starts
-
-### Stop
-
-Mapped from Pi's `agent_end` event.
-
-```json
-{
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "Stop",
-  "stop_hook_active": false,
-  "last_assistant_message": "I have completed the task."
-}
-```
-
-Notes:
-
-- `Stop` runs after the current agent turn finishes
-- `Stop` does not support `matcher`; if configured, it is ignored
-- `stop_hook_active` indicates whether the current continuation was triggered by a previous `Stop` hook
-- `last_assistant_message` tries to extract the last assistant text content; if none exists, it is an empty string
-- When `decision: "block"` is returned, the extension best-effort simulates Claude Code's “prevent stopping and continue” behavior by injecting hidden context and starting another agent turn
-
-### PreToolUse
-
-Mapped from Pi's `tool_call` event.
-
-```json
-{
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Bash",
-  "tool_input": {
-    "command": "ls -la"
-  },
-  "tool_use_id": "toolu_123"
-}
-```
-
-Notes:
-
-- `PreToolUse` runs before the tool actually executes
-- It maps to Pi's `tool_call`, not `tool_execution_start`
-- `matcher` is supported and is applied to `tool_name`
-- `permission_mode` is not included
-- `tool_name` is normalized to Claude-style names such as `Bash`, while lowercase matchers such as `bash` still work
-- `tool_input` comes from `tool_call.event.input`
-- `tool_use_id` comes from `tool_call.event.toolCallId`
-
-### PostToolUse
-
-Mapped from Pi's `tool_result` event and only fired when the tool succeeds.
-
-```json
-{
-  "session_id": "session-file-path",
-  "transcript_path": "/path/to/session.jsonl",
-  "cwd": "/current/working/directory",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Bash",
-  "tool_input": {
-    "command": "pwd"
-  },
-  "tool_response": {
-    "content": [
+  "hooks": {
+    "PreToolUse": [
       {
-        "type": "text",
-        "text": "/tmp/project"
+        "matcher": "Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/me/.local/bin/codebase-memory-mcp",
+            "args": ["hook-augment"]
+          }
+        ]
       }
-    ],
-    "details": {},
-    "is_error": false,
-    "output": "/tmp/project"
-  },
-  "tool_use_id": "toolu_123"
-}
-```
-
-Notes:
-
-- `PostToolUse` runs after successful tool execution
-- It maps to Pi's `tool_result`
-- `permission_mode` is not included
-- `tool_name` is normalized to Claude-style names such as `Bash`, while lowercase matchers such as `bash` still work
-- `tool_input` comes from `tool_result.event.input`
-- `tool_response` is the Claude Code-style compatible tool result object
-- `tool_use_id` comes from `tool_result.event.toolCallId`
-- Failed tool results are routed to `PostToolUseFailure` instead of `PostToolUse`
-
-## Hook Output
-
-### UserPromptSubmit: block the prompt or inject extra context
-
-```json
-{
-  "decision": "block",
-  "reason": "Explanation for decision",
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "My additional context here"
+    ]
   }
 }
 ```
 
-Notes:
+### Inject structured additional context
 
-- For `UserPromptSubmit`, the only meaningful `decision` value is `"block"`
-- Omitting `decision` means allow
-- Other values are ignored
-- `reason` is shown to the user but not injected into context
-- `additionalContext` is injected as hidden context into the current turn
-
-### Stop: prevent stopping and continue for one more turn
-
-```json
-{
-  "decision": "block",
-  "reason": "Run a final self-check before stopping",
-  "hookSpecificOutput": {
-    "hookEventName": "Stop",
-    "additionalContext": "Verify there are no missing tests."
-  }
-}
-```
-
-Notes:
-
-- For `Stop`, the only meaningful `decision` value is `"block"`
-- Omitting `decision` means finish normally
-- `reason` is injected as hidden context into the follow-up agent turn
-- `additionalContext` is injected together with `reason` when `decision: "block"`; if no continuation happens, it is not kept for later user input
-- `stop_hook_active` becomes `true` in follow-up `Stop` events triggered by a previous `Stop` hook, which helps avoid infinite loops
-- The current implementation is based on Pi's `agent_end` + `sendMessage(..., { triggerTurn: true })`, so behavior is best-effort
-
-### PreToolUse: deny or rewrite input
-
-Available output fields:
-
-- `permissionDecision`: `"allow" | "deny" | "ask"`
-- `permissionDecisionReason`: the reason shown to the user/caller
-- `updatedInput`: rewrites tool input before execution
-- `additionalContext`: appends extra context for later processing
-
-Example: deny execution
+A command can print Claude-style JSON:
 
 ```json
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
-    "permissionDecisionReason": "Dangerous command blocked"
+    "additionalContext": "Relevant context for the next tool call."
   }
 }
 ```
 
-Example: allow and rewrite input
+For simple hooks, plain stdout is also injected as hidden context.
+
+## Hook input
+
+Hook commands receive JSON on stdin. Common fields include:
 
 ```json
 {
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "permissionDecision": "allow",
-    "permissionDecisionReason": "My reason here",
-    "updatedInput": {
-      "field_to_modify": "new value"
-    },
-    "additionalContext": "Current environment: production. Proceed with caution."
-  }
+  "session_id": "...",
+  "cwd": "/path/to/project",
+  "hook_event_name": "PreToolUse"
 }
 ```
 
-Notes:
-
-- `permissionDecision: "deny"` blocks the current tool call and returns `permissionDecisionReason` to the agent; it does **not** directly stop the entire current processing flow
-- `permissionDecision: "allow"` lets the tool run; if `updatedInput` is provided, the input is merged before execution
-- `permissionDecision: "ask"` is kept for compatibility only; this extension does not open an additional permission UI
-- `updatedInput` is merged into `event.input`, while unspecified fields keep their original values
-- `additionalContext` does not block execution; it is only injected as hidden context and does not normally create an extra UI message
-- To explicitly stop the current processing flow, use Claude Code's generic field `continue: false`
-
-### PostToolUse: append context or patch tool results
-
-Claude Code-style output example:
+Tool events also include:
 
 ```json
 {
-  "decision": "block",
-  "reason": "Explanation for decision",
-  "hookSpecificOutput": {
-    "hookEventName": "PostToolUse",
-    "additionalContext": "Additional information for Claude"
-  }
+  "tool_name": "Bash",
+  "tool_input": { "command": "git status" },
+  "tool_use_id": "..."
 }
 ```
 
-Or:
+Post-tool events include `tool_response` and, on failures, `error`.
 
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PostToolUse",
-    "additionalContext": "Command succeeded"
-  }
-}
+## Exit and output behavior
+
+| Result | Behavior |
+| --- | --- |
+| exit `0`, plain stdout | Inject stdout as hidden context. |
+| exit `0`, JSON stdout | Parse Claude-style output fields. |
+| exit `2` in `PreToolUse` | Block the tool; stderr is the reason. |
+| other non-zero | Notify the user; do not block. |
+| `async: true` | Return immediately; inject JSON `additionalContext` when the process exits. |
+
+## Development
+
+```bash
+bun install
+bun run typecheck
+bun run build
 ```
 
-Pi-specific direct result patching is also supported:
+`dist/` is build output only. OMP loads the TypeScript source entry directly:
 
-```json
-{
-  "systemMessage": "Hook patched tool result",
-  "content": [
-    {
-      "type": "text",
-      "text": "patched result"
-    }
-  ],
-  "isError": false
-}
+```text
+src/omp-hooks.ts
 ```
 
-Claude Code generic output fields are also supported:
+## Relationship to OMP native hooks
 
-```json
-{
-  "continue": false,
-  "stopReason": "Stop current processing",
-  "systemMessage": "Hook requested stop"
-}
-```
+OMP native extensions are still the best choice for new OMP-specific plugins.
+They are more powerful and typed directly against OMP. `omp-hooks` exists for a
+different reason: compatibility with Claude Code-style command hook config.
 
-Notes:
+If you control the plugin and only target OMP, write an OMP extension. If you are
+porting a Claude Code tool that already ships command hooks, use `omp-hooks`.
 
-- `hookSpecificOutput.hookEventName` is recognized following Claude Code behavior
-- `decision: "block"` does not roll back an already executed tool; instead, `reason` is appended to model context as feedback
-- `additionalContext` is injected into the current agent flow as hidden context, approximating Claude Code's “append context for Claude” behavior; it does not normally produce an extra UI message
-- `systemMessage` is silent by default for tool-related events (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`) and does not normally generate an extra UI message
-- `continue: false` stops current processing in tool events on a best-effort basis; this is different from `PreToolUse.permissionDecision: "deny"`, which only blocks the current tool and returns a reason to the agent
-- For `PostToolUse` and `PostToolUseFailure`, stop-processing behavior does not add an extra local warning by default; the hook's own returned message/result takes precedence
-- In addition to Claude Code-compatible fields, OMP result patching is also supported:
-  - top-level `content`, `details`, `isError`
-  - `hookSpecificOutput.updatedToolResult`
-  - `updatedMCPToolOutput` (for MCP tool output replacement)
-  - `hookSpecificOutput.updatedMCPToolOutput`
+## License
 
-## Project Structure
-
-Source code lives in `src/`:
-
-### Files
-
-- `src/omp-hooks.ts` - extension entry point
-- `src/config.ts` - config loading and merging
-- `src/executor.ts` - command hook executor
-- `src/hook-context.ts` - hook context, `injectHiddenContext`, debounce buffer
-- `src/hooks/shared.ts` - shared parsing and execution helpers
-- `src/hooks/session-hooks.ts` - `SessionStart` / `SessionEnd`
-- `src/hooks/compact-hooks.ts` - `PreCompact` / `PostCompact`
-- `src/hooks/prompt-hooks.ts` - `UserPromptSubmit`
-- `src/hooks/tool-hooks.ts` - `PreToolUse` / `PostToolUse` / `PostToolUseFailure`
-- `src/hooks/stop-hooks.ts` - `Stop`
-- `src/types.ts` - type definitions
-
-## Notes
-
-- Hook commands run in the current session `cwd`
-- Global config and project config are merged by concatenating event arrays
-- `PostToolUse` and `PostToolUseFailure` support OMP result patching
-- Input/output aims to be Claude Code-compatible where possible; anything that cannot be mapped exactly is handled in a best-effort way using OMP's event model
+MIT
