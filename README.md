@@ -1,3 +1,5 @@
+<div align="center">
+
 # omp-hooks
 
 [![npm version](https://img.shields.io/npm/v/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
@@ -9,6 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat-square)](https://www.typescriptlang.org/)
 
 Claude Code-compatible command hooks for the OMP (Oh My Pi) coding agent.
+
+</div>
+
+---
 
 This package adapts Claude Code's hook configuration format to OMP's extension event system so existing command hook workflows can be reused with minimal changes. It is a native OMP plugin — it depends on `@oh-my-pi/pi-coding-agent` directly and reads its hook config from `~/.omp/agent/settings.json` (or `<cwd>/.omp/settings.json`), so it no longer collides with a real Pi install.
 
@@ -29,30 +35,43 @@ omp-hooks bridges that gap. It reads Claude Code's hooks config format and wires
 
 ## Installation
 
-### Option 1: One-command install
+### Option 1: Install from npm (recommended)
+
+```bash
+omp install omp-hooks
+```
+
+That's it. omp-hooks is now installed and active. Restart OMP (or run `/reload`) to load it.
+
+### Option 2: Install from GitHub
 
 ```bash
 omp install git:github.com/ZeR020/omp-hooks
 ```
 
-That's it. omp-hooks is now installed and active. Restart OMP (or run `/reload`) to load it.
-
-### Option 2: Let your agent install it for you
+### Option 3: Let your agent install it for you
 
 Paste this into your OMP session:
 
 ```
-Install omp-hooks from github.com/ZeR020/omp-hooks using omp install git: and then help me set up a basic hook in ~/.omp/agent/settings.json
+Install omp-hooks from npm using omp install omp-hooks and then help me set up a basic hook in ~/.omp/agent/settings.json
 ```
 
 Your agent will run the install command and walk you through configuring your first hook.
 
-### Option 3: From source (for development)
+### Option 4: From source (for development)
 
 ```bash
 git clone https://github.com/ZeR020/omp-hooks.git
 omp plugin link omp-hooks
 ```
+
+### Updating
+
+```bash
+omp plugin upgrade omp-hooks
+```
+
 
 ### After install: add your first hook
 
