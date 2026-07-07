@@ -1,8 +1,11 @@
 # omp-hooks
 
+[![npm version](https://img.shields.io/npm/v/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
+[![npm downloads](https://img.shields.io/npm/dm/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
 [![GitHub release](https://img.shields.io/github/v/release/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/releases)
 [![License: MIT](https://img.shields.io/github/license/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/stargazers)
+[![CI](https://img.shields.io/github/actions/workflow/status/ZeR020/omp-hooks/ci.yml?branch=main&style=flat-square)](https://github.com/ZeR020/omp-hooks/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat-square)](https://www.typescriptlang.org/)
 
 Claude Code-compatible command hooks for the OMP (Oh My Pi) coding agent.
