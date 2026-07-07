@@ -10,9 +10,9 @@ import type {
 } from "../types";
 import {
   appendAdditionalContext,
-  executeParsedHook,
+  collectMatchingHooks,
   getStringField,
-  hookIfMatches,
+  runHooksParallel,
 } from "./shared";
 
 function findLastAssistantMessageText(messages: unknown[]): string {
@@ -36,62 +36,63 @@ export async function triggerStopHooks(
   notify?: NotifyFn,
 ): Promise<StopResult> {
   const groups = getHookGroups(settings, "Stop");
+  const collected = collectMatchingHooks(groups, context, "");
+  const results = await runHooksParallel(collected, context, "Stop");
+
   const result: StopResult = { blocked: false };
+  const blockReasons: string[] = [];
 
-  for (const group of groups) {
-    for (const hook of group.hooks ?? []) {
-      if (hook.if && !hookIfMatches(context, hook.if)) continue;
-
-      try {
-        const { hookResult, plainStdout, jsonOutput, commonOutput } =
-          await executeParsedHook(hook, context, "Stop");
-
-        if (hookResult.exitCode === 0 && jsonOutput) {
-          const additionalContext = getStringField(
-            commonOutput?.hookSpecificOutput?.additionalContext,
-            jsonOutput.additionalContext,
-          );
-
-          result.additionalContext = appendAdditionalContext(
-            result.additionalContext,
-            additionalContext,
-          );
-
-          if (commonOutput?.systemMessage) {
-            notify?.(commonOutput.systemMessage, "warning");
-          }
-
-          if (
-            jsonOutput.decision !== undefined &&
-            jsonOutput.decision !== "block"
-          ) {
-            notify?.(
-              `Stop 忽略无效 decision: ${String(jsonOutput.decision)}`,
-              "warning",
-            );
-          }
-
-          if (jsonOutput.decision === "block") {
-            result.blocked = true;
-            result.reason =
-              getStringField(jsonOutput.reason) ??
-              "Continue requested by Stop hook";
-            return result;
-          }
-        } else if (hookResult.exitCode === 0 && plainStdout) {
-          notify?.(`Stop 输出 (非JSON): ${plainStdout}`, "info");
-        }
-
-        if (hookResult.exitCode !== 0) {
-          notify?.(
-            `Stop 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
-            "error",
-          );
-        }
-      } catch (err) {
-        notify?.(`Stop 执行错误: ${String(err)}`, "error");
-      }
+  for (const { hookResult, plainStdout, jsonOutput, commonOutput, error } of results) {
+    if (error) {
+      notify?.(`Stop 执行错误: ${String(error)}`, "error");
+      continue;
     }
+
+    if (hookResult.exitCode === 0 && jsonOutput) {
+      const additionalContext = getStringField(
+        commonOutput?.hookSpecificOutput?.additionalContext,
+        jsonOutput.additionalContext,
+      );
+
+      result.additionalContext = appendAdditionalContext(
+        result.additionalContext,
+        additionalContext,
+      );
+
+      if (commonOutput?.systemMessage) {
+        notify?.(commonOutput.systemMessage, "warning");
+      }
+
+      if (
+        jsonOutput.decision !== undefined &&
+        jsonOutput.decision !== "block"
+      ) {
+        notify?.(
+          `Stop 忽略无效 decision: ${String(jsonOutput.decision)}`,
+          "warning",
+        );
+      }
+
+      if (jsonOutput.decision === "block") {
+        blockReasons.push(
+          getStringField(jsonOutput.reason) ?? "Continue requested by Stop hook",
+        );
+      }
+    } else if (hookResult.exitCode === 0 && plainStdout) {
+      notify?.(`Stop 输出 (非JSON): ${plainStdout}`, "info");
+    }
+
+    if (hookResult.exitCode !== 0) {
+      notify?.(
+        `Stop 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
+        "error",
+      );
+    }
+  }
+
+  if (blockReasons.length > 0) {
+    result.blocked = true;
+    result.reason = blockReasons[0];
   }
 
   return result;

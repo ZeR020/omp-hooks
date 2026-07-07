@@ -250,6 +250,21 @@ A command can print Claude-style JSON:
 
 For simple hooks, plain stdout is also injected as hidden context.
 
+### Replace tool output (`PostToolUse` only)
+
+A `PostToolUse` hook can replace what the model sees by returning `updatedToolOutput`:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PostToolUse",
+    "updatedToolOutput": "replacement content the model sees instead"
+  }
+}
+```
+
+The value is passed through as OMP-shaped `content`. For MCP tools, `updatedMCPToolOutput` is also accepted. The tool has already run — only what the model sees changes.
+
 ## Hook input
 
 Hook commands receive JSON on stdin. Common fields include:
@@ -283,6 +298,17 @@ Post-tool events include `tool_response` and, on failures, `error`.
 | exit `2` in `PreToolUse` | Block the tool; stderr is the reason. |
 | other non-zero | Notify the user; do not block. |
 | `async: true` | Return immediately; inject JSON `additionalContext` when the process exits. |
+
+## Parallel execution
+
+Matching hooks run in parallel (Claude Code behavior). When multiple hooks match the same event:
+
+- **All hooks fire concurrently** via `Promise.allSettled` — total time is `max(hook durations)`, not the sum.
+- **Identical handlers are deduplicated** by `command` + `args` (so a hook defined in both global and project settings fires once).
+- **Deny wins**: for `PreToolUse`, if any hook returns `deny`/exit-2, the tool is blocked regardless of `allow` from other hooks. `stopProcessing` wins over deny.
+- **`updatedInput` merges** in config order (last wins per key).
+- **`additionalContext` concatenates** in config order for stable output.
+- **PostToolUse patches**: first non-undefined `content`/`details`/`isError` wins (by config order).
 
 ## Development
 

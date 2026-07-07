@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { getHookGroups, matcherMatches, toClaudeToolName } from "../config";
+import { getHookGroups, toClaudeToolName } from "../config";
 import { extractErrorFromContent } from "../helpers";
 import type { HookModuleContext } from "../hook-context";
 import type {
@@ -11,10 +11,11 @@ import type {
 } from "../types";
 import {
   appendAdditionalContext,
-  executeParsedHook,
+  collectMatchingHooks,
+  type HookExecResult,
   extractToolResultPatch,
   getStringField,
-  hookIfMatches,
+  runHooksParallel,
 } from "./shared";
 
 export async function triggerPreToolUseHooks(
@@ -24,85 +25,173 @@ export async function triggerPreToolUseHooks(
   notify?: NotifyFn,
 ): Promise<PreToolUseResult> {
   const groups = getHookGroups(settings, "PreToolUse");
-  const result: PreToolUseResult = { blocked: false };
-
   const claudeToolName = toClaudeToolName(toolName);
 
-  for (const group of groups) {
-    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
-    for (const hook of group.hooks ?? []) {
-      if (hook.if && !hookIfMatches(context, hook.if)) continue;
+  const collected = collectMatchingHooks(groups, context, claudeToolName, [
+    toolName,
+  ]);
+  const results = await runHooksParallel(collected, context, "PreToolUse");
 
-      try {
-        const { hookResult, plainStdout, jsonOutput, commonOutput } =
-          await executeParsedHook(hook, context, "PreToolUse");
+  const result: PreToolUseResult = { blocked: false };
+  const denyReasons: string[] = [];
+  let deny = false;
+  let stop = false;
 
-        if (hookResult.exitCode === 2) {
-          result.blocked = true;
-          result.reason = hookResult.stderr || "Blocked by hook";
-          notify?.(`PreToolUse 阻止: ${result.reason}`, "warning");
-          return result;
-        }
-
-        if (hookResult.exitCode === 0 && jsonOutput) {
-          const hookSpecific = commonOutput?.hookSpecificOutput;
-
-          if (commonOutput?.stopProcessing) {
-            result.stopProcessing = true;
-            result.stopReason = commonOutput.stopReason;
-            return result;
-          }
-
-          const decision = (hookSpecific?.permissionDecision ??
-            jsonOutput.permissionDecision) as
-            | "allow"
-            | "deny"
-            | "ask"
-            | undefined;
-
-          if (decision === "deny") {
-            result.blocked = true;
-            result.reason = (hookSpecific?.permissionDecisionReason ??
-              jsonOutput.permissionDecisionReason) as string | undefined;
-            result.reason ??= "Blocked by hook";
-            notify?.(`PreToolUse 拒绝: ${result.reason}`, "warning");
-            return result;
-          }
-
-          if (
-            (hookSpecific?.updatedInput ?? jsonOutput.updatedInput) &&
-            typeof (hookSpecific?.updatedInput ?? jsonOutput.updatedInput) ===
-              "object"
-          ) {
-            result.updatedInput = (hookSpecific?.updatedInput ??
-              jsonOutput.updatedInput) as Record<string, unknown>;
-          }
-
-          const additionalContext = getStringField(
-            hookSpecific?.additionalContext,
-            jsonOutput.additionalContext,
-          );
-          result.additionalContext = appendAdditionalContext(
-            result.additionalContext,
-            additionalContext,
-          );
-        } else if (hookResult.exitCode === 0 && plainStdout) {
-          notify?.(`PreToolUse 输出 (非JSON): ${plainStdout}`, "info");
-        }
-
-        if (hookResult.exitCode !== 0 && hookResult.exitCode !== 2) {
-          notify?.(
-            `PreToolUse 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
-            "error",
-          );
-        }
-      } catch (err) {
-        notify?.(`PreToolUse 执行错误: ${String(err)}`, "error");
-      }
+  // First pass: stopProcessing wins over everything (even deny)
+  for (const exec of results) {
+    if (exec.error) {
+      notify?.(`PreToolUse 执行错误: ${String(exec.error)}`, "error");
+      continue;
+    }
+    if (exec.commonOutput?.stopProcessing) {
+      stop = true;
+      result.stopProcessing = true;
+      result.stopReason = exec.commonOutput.stopReason;
+      notify?.(`PreToolUse 停止处理: ${result.stopReason ?? ""}`, "warning");
+      break;
     }
   }
 
+  // If not stopped, second pass: collect deny (deny-wins), updatedInput (merge in order), context
+  for (const { hookResult, plainStdout, jsonOutput, commonOutput, error } of results) {
+    if (error) continue;
+
+    if (hookResult.exitCode === 2) {
+      deny = true;
+      denyReasons.push(hookResult.stderr || "Blocked by hook");
+      continue;
+    }
+
+    if (hookResult.exitCode === 0 && jsonOutput) {
+      const hookSpecific = commonOutput?.hookSpecificOutput;
+
+      const decision = (hookSpecific?.permissionDecision ??
+        jsonOutput.permissionDecision) as
+        | "allow"
+        | "deny"
+        | "ask"
+        | undefined;
+
+      if (decision === "deny") {
+        deny = true;
+        denyReasons.push(
+          (hookSpecific?.permissionDecisionReason ??
+            jsonOutput.permissionDecisionReason) as string | undefined ??
+            "Blocked by hook",
+        );
+        continue;
+      }
+
+      if (
+        (hookSpecific?.updatedInput ?? jsonOutput.updatedInput) &&
+        typeof (hookSpecific?.updatedInput ?? jsonOutput.updatedInput) === "object"
+      ) {
+        result.updatedInput = {
+          ...(result.updatedInput ?? {}),
+          ...((hookSpecific?.updatedInput ?? jsonOutput.updatedInput) as Record<
+            string,
+            unknown
+          >),
+        };
+      }
+
+      const additionalContext = getStringField(
+        hookSpecific?.additionalContext,
+        jsonOutput.additionalContext,
+      );
+      result.additionalContext = appendAdditionalContext(
+        result.additionalContext,
+        additionalContext,
+      );
+    } else if (hookResult.exitCode === 0 && plainStdout) {
+      notify?.(`PreToolUse 输出 (非JSON): ${plainStdout}`, "info");
+    }
+
+    if (hookResult.exitCode !== 0 && hookResult.exitCode !== 2) {
+      notify?.(
+        `PreToolUse 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
+        "error",
+      );
+    }
+  }
+
+  if (deny) {
+    result.blocked = true;
+    result.reason = denyReasons[0];
+    notify?.(`PreToolUse 拒绝: ${result.reason}`, "warning");
+  }
+
   return result;
+}
+
+/**
+ * Merge logic for PostToolUse / PostToolUseFailure:
+ * - stopProcessing wins over everything (collected first)
+ * - first non-undefined content/details/isError wins (earlier-defined hook)
+ * - additionalContext concatenated in config order
+ */
+function mergePostToolUseResults(
+  results: HookExecResult[],
+  result: PostToolUseResult,
+  notify?: NotifyFn,
+): void {
+  // First pass: stopProcessing wins
+  for (const exec of results) {
+    if (exec.error) {
+      notify?.(`PostToolUse 执行错误: ${String(exec.error)}`, "error");
+      continue;
+    }
+    if (exec.commonOutput?.stopProcessing) {
+      result.stopProcessing = true;
+      result.stopReason = exec.commonOutput.stopReason;
+      break;
+    }
+  }
+
+  // Second pass: patch + context in order
+  for (const { hookResult, plainStdout, jsonOutput, commonOutput, error } of results) {
+    if (error) continue;
+
+    if (hookResult.exitCode === 2) {
+      notify?.(`PostToolUse 反馈: ${hookResult.stderr}`, "warning");
+      continue;
+    }
+
+    if (hookResult.exitCode === 0 && jsonOutput) {
+      const hookSpecific = commonOutput?.hookSpecificOutput;
+
+      const additionalContext = getStringField(
+        hookSpecific?.additionalContext,
+        jsonOutput.additionalContext,
+        jsonOutput.decision === "block" ? jsonOutput.reason : undefined,
+      );
+
+      result.additionalContext = appendAdditionalContext(
+        result.additionalContext,
+        additionalContext,
+      );
+
+      const patch = extractToolResultPatch("PostToolUse", jsonOutput);
+      if (result.content === undefined && patch.content !== undefined) {
+        result.content = patch.content;
+      }
+      if (result.details === undefined && patch.details !== undefined) {
+        result.details = patch.details;
+      }
+      if (result.isError === undefined && patch.isError !== undefined) {
+        result.isError = patch.isError;
+      }
+    } else if (hookResult.exitCode === 0 && plainStdout) {
+      notify?.(`PostToolUse 输出: ${plainStdout}`, "info");
+    }
+
+    if (hookResult.exitCode !== 0 && hookResult.exitCode !== 2) {
+      notify?.(
+        `PostToolUse 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
+        "error",
+      );
+    }
+  }
 }
 
 export async function triggerPostToolUseHooks(
@@ -112,63 +201,15 @@ export async function triggerPostToolUseHooks(
   notify?: NotifyFn,
 ): Promise<PostToolUseResult> {
   const groups = getHookGroups(settings, "PostToolUse");
-  const result: PostToolUseResult = {};
-
   const claudeToolName = toClaudeToolName(toolName);
 
-  for (const group of groups) {
-    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
-    for (const hook of group.hooks ?? []) {
-      if (hook.if && !hookIfMatches(context, hook.if)) continue;
+  const collected = collectMatchingHooks(groups, context, claudeToolName, [
+    toolName,
+  ]);
+  const results = await runHooksParallel(collected, context, "PostToolUse");
 
-      try {
-        const { hookResult, plainStdout, jsonOutput, commonOutput } =
-          await executeParsedHook(hook, context, "PostToolUse");
-
-        if (hookResult.exitCode === 2) {
-          notify?.(`PostToolUse 反馈: ${hookResult.stderr}`, "warning");
-          continue;
-        }
-
-        if (hookResult.exitCode === 0 && jsonOutput) {
-          const hookSpecific = commonOutput?.hookSpecificOutput;
-
-          if (commonOutput?.stopProcessing) {
-            result.stopProcessing = true;
-            result.stopReason = commonOutput.stopReason;
-          }
-
-          const additionalContext = getStringField(
-            hookSpecific?.additionalContext,
-            jsonOutput.additionalContext,
-            jsonOutput.decision === "block" ? jsonOutput.reason : undefined,
-          );
-
-          result.additionalContext = appendAdditionalContext(
-            result.additionalContext,
-            additionalContext,
-          );
-
-          const patch = extractToolResultPatch("PostToolUse", jsonOutput);
-          if (patch.content !== undefined) result.content = patch.content;
-          if (patch.details !== undefined) result.details = patch.details;
-          if (patch.isError !== undefined) result.isError = patch.isError;
-        } else if (hookResult.exitCode === 0 && plainStdout) {
-          notify?.(`PostToolUse 输出: ${plainStdout}`, "info");
-        }
-
-        if (hookResult.exitCode !== 0 && hookResult.exitCode !== 2) {
-          notify?.(
-            `PostToolUse 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
-            "error",
-          );
-        }
-      } catch (err) {
-        notify?.(`PostToolUse 执行错误: ${String(err)}`, "error");
-      }
-    }
-  }
-
+  const result: PostToolUseResult = {};
+  mergePostToolUseResults(results, result, notify);
   return result;
 }
 
@@ -179,67 +220,15 @@ export async function triggerPostToolUseFailureHooks(
   notify?: NotifyFn,
 ): Promise<PostToolUseResult> {
   const groups = getHookGroups(settings, "PostToolUseFailure");
-  const result: PostToolUseResult = {};
-
   const claudeToolName = toClaudeToolName(toolName);
 
-  for (const group of groups) {
-    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
+  const collected = collectMatchingHooks(groups, context, claudeToolName, [
+    toolName,
+  ]);
+  const results = await runHooksParallel(collected, context, "PostToolUseFailure");
 
-    for (const hook of group.hooks ?? []) {
-      if (hook.if && !hookIfMatches(context, hook.if)) continue;
-
-      try {
-        const { hookResult, plainStdout, jsonOutput, commonOutput } =
-          await executeParsedHook(hook, context, "PostToolUseFailure");
-
-        if (hookResult.exitCode === 2) {
-          notify?.(`PostToolUseFailure 反馈: ${hookResult.stderr}`, "warning");
-          continue;
-        }
-
-        if (hookResult.exitCode === 0 && jsonOutput) {
-          const hookSpecific = commonOutput?.hookSpecificOutput;
-
-          if (commonOutput?.stopProcessing) {
-            result.stopProcessing = true;
-            result.stopReason = commonOutput.stopReason;
-          }
-
-          const additionalContext = getStringField(
-            hookSpecific?.additionalContext,
-            jsonOutput.additionalContext,
-            jsonOutput.decision === "block" ? jsonOutput.reason : undefined,
-          );
-
-          result.additionalContext = appendAdditionalContext(
-            result.additionalContext,
-            additionalContext,
-          );
-
-          const patch = extractToolResultPatch(
-            "PostToolUseFailure",
-            jsonOutput,
-          );
-          if (patch.content !== undefined) result.content = patch.content;
-          if (patch.details !== undefined) result.details = patch.details;
-          if (patch.isError !== undefined) result.isError = patch.isError;
-        } else if (hookResult.exitCode === 0 && plainStdout) {
-          notify?.(`PostToolUseFailure 输出: ${plainStdout}`, "info");
-        }
-
-        if (hookResult.exitCode !== 0 && hookResult.exitCode !== 2) {
-          notify?.(
-            `PostToolUseFailure 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
-            "error",
-          );
-        }
-      } catch (err) {
-        notify?.(`PostToolUseFailure 执行错误: ${String(err)}`, "error");
-      }
-    }
-  }
-
+  const result: PostToolUseResult = {};
+  mergePostToolUseResults(results, result, notify);
   return result;
 }
 

@@ -4,6 +4,7 @@ import type {
   Hook,
   HookExecutionContext,
   HookEventName,
+  HookGroup,
   HookRunResult,
   NotifyFn,
   SettingsFile,
@@ -146,16 +147,19 @@ export function getStringField(
   return undefined;
 }
 
-export function extractCommonOutput(
-  eventName: HookEventName,
-  jsonOutput: Record<string, unknown>,
-): {
+/** Common output fields extracted from hook JSON, shared across all events. */
+export type CommonHookOutput = {
   hookSpecificOutput?: Record<string, unknown>;
   systemMessage?: string;
   suppressOutput: boolean;
   stopProcessing: boolean;
   stopReason?: string;
-} {
+};
+
+export function extractCommonOutput(
+  eventName: HookEventName,
+  jsonOutput: Record<string, unknown>,
+): CommonHookOutput {
   const hookSpecificOutput = getHookSpecificOutput(eventName, jsonOutput);
 
   return {
@@ -173,18 +177,24 @@ export function extractToolResultPatch(
 ): ToolResultPatch {
   const hookSpecificOutput = getHookSpecificOutput(eventName, jsonOutput);
 
+  // Claude Code field: updatedToolOutput (replaces tool output before sending to model)
+  const updatedToolOutput = hookSpecificOutput?.updatedToolOutput;
+
+  // Legacy omp-hooks field: updatedToolResult (invented pre-v0.0.4, kept for compat)
   const updatedToolResult =
     typeof hookSpecificOutput?.updatedToolResult === "object" &&
     hookSpecificOutput.updatedToolResult !== null
       ? (hookSpecificOutput.updatedToolResult as Record<string, unknown>)
       : undefined;
 
+  // Claude Code field: updatedMCPToolOutput (MCP-specific, prefer updatedToolOutput)
   const updatedMCPToolOutput =
     hookSpecificOutput?.updatedMCPToolOutput ?? jsonOutput.updatedMCPToolOutput;
 
   return {
+    // Priority: updatedToolOutput (Claude) > updatedToolResult.content (legacy) > updatedMCPToolOutput > fallback
     content:
-      updatedToolResult?.content ?? updatedMCPToolOutput ?? jsonOutput.content,
+      updatedToolOutput ?? updatedToolResult?.content ?? updatedMCPToolOutput ?? jsonOutput.content,
     details: updatedToolResult?.details ?? jsonOutput.details,
     isError:
       typeof (updatedToolResult?.isError ?? jsonOutput.isError) === "boolean"
@@ -201,7 +211,7 @@ export async function executeParsedHook(
   hookResult: { stdout: string; stderr: string; exitCode: number };
   plainStdout: string;
   jsonOutput?: Record<string, unknown>;
-  commonOutput?: ReturnType<typeof extractCommonOutput>;
+  commonOutput?: CommonHookOutput;
 }> {
   const input = buildHookInput(context);
   const timeout = getHookTimeoutMs(hook, eventName);
@@ -268,6 +278,121 @@ export async function executeParsedHook(
       : undefined,
   };
 }
+// ============================================================================
+// Parallel hook execution helpers (matches Claude Code behavior:
+// "All matching hooks run in parallel, and identical handlers are
+// deduplicated automatically.")
+// ============================================================================
+
+/** Dedup key: command + JSON(args). Matches Claude Code's dedup for command hooks. */
+function hookDedupeKey(hook: Hook): string {
+  return hook.args ? `${hook.command}\0${JSON.stringify(hook.args)}` : hook.command;
+}
+
+/** A hook paired with its original config index for stable ordering. */
+export type CollectedHook = { hook: Hook; originalIndex: number };
+
+/** Result of a single parallel hook execution. */
+export type HookExecResult = {
+  hook: Hook;
+  originalIndex: number;
+  hookResult: { stdout: string; stderr: string; exitCode: number };
+  plainStdout: string;
+  jsonOutput?: Record<string, unknown>;
+  commonOutput?: CommonHookOutput;
+  error?: unknown;
+};
+
+/**
+ * Collect matching hooks across groups, filter by matcher + if, and deduplicate
+ * by command+args (Claude Code dedup rule). Returns hooks in config order.
+ */
+export function collectMatchingHooks(
+  groups: HookGroup[],
+  context: HookExecutionContext,
+  matcherValue: string,
+  aliases: string[] = [],
+  effectiveMatcherFn?: (group: HookGroup) => string | undefined,
+): CollectedHook[] {
+  const collected: CollectedHook[] = [];
+  const seen = new Set<string>();
+  let index = 0;
+
+  for (const group of groups) {
+    const matcher = effectiveMatcherFn ? effectiveMatcherFn(group) : group.matcher;
+    if (!matcherMatches(matcher, matcherValue, aliases)) {
+      index += group.hooks?.length ?? 0;
+      continue;
+    }
+
+    for (const hook of group.hooks ?? []) {
+      const i = index++;
+      if (hook.if && !hookIfMatches(context, hook.if)) continue;
+
+      const key = hookDedupeKey(hook);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      collected.push({ hook, originalIndex: i });
+    }
+  }
+
+  return collected;
+}
+
+/**
+ * Run all collected hooks in parallel via Promise.allSettled.
+ * Returns results sorted by originalIndex (deterministic order).
+ */
+export async function runHooksParallel(
+  collected: CollectedHook[],
+  context: HookExecutionContext,
+  eventName: HookEventName,
+): Promise<HookExecResult[]> {
+  if (collected.length === 0) return [];
+
+  if (collected.length === 1) {
+    const { hook, originalIndex } = collected[0];
+    try {
+      const result = await executeParsedHook(hook, context, eventName);
+      return [{ hook, originalIndex, ...result }];
+    } catch (error) {
+      return [{
+        hook,
+        originalIndex,
+        hookResult: { stdout: "", stderr: String(error), exitCode: 1 },
+        plainStdout: "",
+        error,
+      }];
+    }
+  }
+
+  const settled = await Promise.allSettled(
+    collected.map(({ hook }) => executeParsedHook(hook, context, eventName)),
+  );
+
+  const results: HookExecResult[] = settled.map((outcome, i) => {
+    const { hook, originalIndex } = collected[i];
+    if (outcome.status === "fulfilled") {
+      return { hook, originalIndex, ...outcome.value };
+    }
+    return {
+      hook,
+      originalIndex,
+      hookResult: { stdout: "", stderr: String(outcome.reason), exitCode: 1 },
+      plainStdout: "",
+      error: outcome.reason,
+    };
+  });
+
+  results.sort((a, b) => a.originalIndex - b.originalIndex);
+  return results;
+}
+
+
+// ============================================================================
+// Trigger functions (use parallel execution)
+// ============================================================================
 
 export async function triggerSimpleHooks(
   eventName: HookEventName,
@@ -277,64 +402,64 @@ export async function triggerSimpleHooks(
   notify?: NotifyFn,
 ): Promise<HookRunResult> {
   const groups = getHookGroups(settings, eventName);
+  const collected = collectMatchingHooks(
+    groups,
+    context,
+    matcherValue,
+    [],
+    eventName === "SessionEnd"
+      ? (group) => group.matcher ?? "other"
+      : undefined,
+  );
+
+  const results = await runHooksParallel(collected, context, eventName);
   const aggregatedResult: HookRunResult = {};
 
-  for (const group of groups) {
-    const effectiveMatcher =
-      eventName === "SessionEnd" ? (group.matcher ?? "other") : group.matcher;
+  for (const { hookResult, plainStdout, jsonOutput, commonOutput, error } of results) {
+    if (error) {
+      notify?.(`Hook 执行错误: ${String(error)}`, "error");
+      continue;
+    }
 
-    if (!matcherMatches(effectiveMatcher, matcherValue)) continue;
+    const additionalContext = jsonOutput
+      ? getStringField(
+          commonOutput?.hookSpecificOutput?.additionalContext,
+          jsonOutput.additionalContext,
+        )
+      : undefined;
+    aggregatedResult.additionalContext = appendAdditionalContext(
+      aggregatedResult.additionalContext,
+      additionalContext,
+    );
 
-    for (const hook of group.hooks ?? []) {
-      if (hook.if && !hookIfMatches(context, hook.if)) continue;
+    if (
+      eventName === "SessionStart" &&
+      hookResult.exitCode === 0 &&
+      !jsonOutput &&
+      plainStdout
+    ) {
+      aggregatedResult.additionalContext = appendAdditionalContext(
+        aggregatedResult.additionalContext,
+        plainStdout,
+      );
+    }
 
-      try {
-        const { hookResult, plainStdout, jsonOutput, commonOutput } =
-          await executeParsedHook(hook, context, eventName);
+    if (commonOutput?.systemMessage) {
+      notify?.(commonOutput.systemMessage, "warning");
+    }
 
-        const additionalContext = jsonOutput
-          ? getStringField(
-              commonOutput?.hookSpecificOutput?.additionalContext,
-              jsonOutput.additionalContext,
-            )
-          : undefined;
-        aggregatedResult.additionalContext = appendAdditionalContext(
-          aggregatedResult.additionalContext,
-          additionalContext,
-        );
-
-        if (
-          eventName === "SessionStart" &&
-          hookResult.exitCode === 0 &&
-          !jsonOutput &&
-          plainStdout
-        ) {
-          aggregatedResult.additionalContext = appendAdditionalContext(
-            aggregatedResult.additionalContext,
-            plainStdout,
-          );
-        }
-
-        if (commonOutput?.systemMessage) {
-          notify?.(commonOutput.systemMessage, "warning");
-        }
-
-        if (hookResult.exitCode !== 0) {
-          notify?.(
-            `Hook 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
-            "error",
-          );
-        } else if (
-          plainStdout &&
-          eventName !== "SessionStart" &&
-          !jsonOutput &&
-          commonOutput?.suppressOutput !== true
-        ) {
-          notify?.(`Hook 输出: ${plainStdout}`, "info");
-        }
-      } catch (err) {
-        notify?.(`Hook 执行错误: ${String(err)}`, "error");
-      }
+    if (hookResult.exitCode !== 0) {
+      notify?.(
+        `Hook 失败 (exit ${hookResult.exitCode}): ${hookResult.stderr}`,
+        "error",
+      );
+    } else if (
+      plainStdout &&
+      eventName !== "SessionStart" &&
+      !jsonOutput &&
+      commonOutput?.suppressOutput !== true
+    ) {
+      notify?.(`Hook 输出: ${plainStdout}`, "info");
     }
   }
 
