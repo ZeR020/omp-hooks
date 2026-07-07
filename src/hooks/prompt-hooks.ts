@@ -103,17 +103,15 @@ export function registerPromptHooks(
     if (result.blocked) {
       shared.notify(
         ctx,
-        `UserPromptSubmit 阻止: ${result.reason ?? "Blocked by hook"}`,
+        `UserPromptSubmit blocked: ${result.reason ?? "Blocked by hook"}`,
         "warning",
       );
-      return { action: "handled" } as const;
+      return { handled: true };
     }
 
     if (result.additionalContext) {
       shared.pendingUserPromptContext = result.additionalContext;
     }
-
-    return { action: "continue" } as const;
   });
 
   pi.on("before_agent_start", async (_event, _ctx) => {

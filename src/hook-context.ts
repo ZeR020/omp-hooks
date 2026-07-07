@@ -9,10 +9,10 @@ export type NotifyType = "info" | "error" | "warning";
 // Debounce buffer for injectHiddenContext — module-level so parallel calls
 // within the same process share one queue. 50ms window collapses a burst of
 // grep/glob injections into one combined sendMessage.
-const _injectBuffer: { content: string[]; details: Record<string, unknown>; timer: NodeJS.Timeout | null } = {
+const _injectBuffer: { content: string[]; details: Record<string, unknown>; timer: NodeJS.Timeout | undefined } = {
   content: [],
   details: {},
-  timer: null,
+  timer: undefined,
 };
 
 export type HookModuleContext = {
@@ -68,7 +68,7 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
         });
         _injectBuffer.content = [];
         _injectBuffer.details = {};
-        _injectBuffer.timer = null;
+        _injectBuffer.timer = undefined;
       }, 50);
     },
     initSettings: (cwd: string) => {

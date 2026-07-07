@@ -32,7 +32,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepublishOnly": "bun build src/omp-hooks.ts --target=bun --outdir=/tmp/omp-hooks-build-check"
+    "build": "bun build src/omp-hooks.ts --target=bun --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run typecheck && bun run build"
   },
   "omp": {
     "extensions": [
