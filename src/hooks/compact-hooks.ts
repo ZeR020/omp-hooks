@@ -20,7 +20,7 @@ async function triggerCompactHooks(
 export function registerCompactHooks(pi: ExtensionAPI, shared: HookModuleContext) {
   pi.on("session_before_compact", async (event, ctx) => {
     const trigger: "manual" | "auto" = "manual";
-    await triggerCompactHooks(
+    const result = await triggerCompactHooks(
       "PreCompact",
       {
         sessionId: shared.getSessionId(ctx),
@@ -35,12 +35,18 @@ export function registerCompactHooks(pi: ExtensionAPI, shared: HookModuleContext
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),
     );
+
+    if (result.additionalContext) {
+      shared.injectHiddenContext(result.additionalContext, {
+        hookEventName: "PreCompact",
+      });
+    }
   });
 
   pi.on("session_compact", async (event, ctx) => {
     const trigger: "manual" | "auto" = "manual";
 
-    await triggerCompactHooks(
+    const result = await triggerCompactHooks(
       "PostCompact",
       {
         sessionId: shared.getSessionId(ctx),
@@ -55,6 +61,12 @@ export function registerCompactHooks(pi: ExtensionAPI, shared: HookModuleContext
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),
     );
+
+    if (result.additionalContext) {
+      shared.injectHiddenContext(result.additionalContext, {
+        hookEventName: "PostCompact",
+      });
+    }
 
     await shared.triggerSessionStartHook("compact", ctx);
   });

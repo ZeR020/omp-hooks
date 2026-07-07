@@ -136,6 +136,10 @@ export function registerStopHooks(pi: ExtensionAPI, shared: HookModuleContext) {
         },
       );
       return;
+    } else if (result.additionalContext) {
+      shared.injectHiddenContext(result.additionalContext, {
+        hookEventName: "Stop",
+      });
     }
 
     shared.stopHookActive = false;

@@ -46,7 +46,7 @@ export function registerSessionHooks(
     const reason = "other";
 
     // SessionEnd is always triggered by session_shutdown; matcher uses "other" only.
-    await triggerSessionHooks(
+    const result = await triggerSessionHooks(
       "SessionEnd",
       reason,
       {
@@ -60,5 +60,11 @@ export function registerSessionHooks(
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),
     );
+
+    if (result.additionalContext) {
+      shared.injectHiddenContext(result.additionalContext, {
+        hookEventName: "SessionEnd",
+      });
+    }
   });
 }
