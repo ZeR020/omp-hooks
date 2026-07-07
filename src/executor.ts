@@ -54,15 +54,48 @@ export function buildHookInput(ctx: HookExecutionContext): object {
     ctx.hookEventName === "PostToolUseFailure"
   ) {
     const toolName = ctx.toolName ? toClaudeToolName(ctx.toolName) : undefined;
+    const rawToolInput = (ctx.toolInput ?? {}) as Record<string, unknown>;
+
+    // Add Claude-compatible field aliases so hook scripts written for Claude
+    // Code work without a bridge script. OMP and Claude Code use different
+    // field names for the same data; we include both so either works.
+    const toolInputAliases: Record<string, unknown> = {};
+
+    // Glob: OMP sends .path, Claude Code sends .pattern
+    if (toolName === "Glob" && rawToolInput.path && !rawToolInput.pattern) {
+      toolInputAliases.pattern = rawToolInput.path;
+    }
+
+    // Read/Edit/Write: OMP sends .path, Claude Code sends .file_path
+    if (toolName === "Read" || toolName === "Edit" || toolName === "Write") {
+      if (rawToolInput.path && !rawToolInput.file_path) {
+        toolInputAliases.file_path = rawToolInput.path;
+      }
+      // Read (URL): some Claude hook scripts expect .url and .prompt
+      if (toolName === "Read" && typeof rawToolInput.path === "string" && rawToolInput.path.startsWith("http")) {
+        if (!rawToolInput.url) toolInputAliases.url = rawToolInput.path;
+        if (rawToolInput.i && !rawToolInput.prompt) toolInputAliases.prompt = rawToolInput.i;
+      }
+    }
+
     const toolInput: Record<string, unknown> = {
       ...base,
       tool_name: toolName,
-      tool_input: ctx.toolInput,
+      tool_input: { ...rawToolInput, ...toolInputAliases },
       tool_use_id: ctx.toolUseId,
     };
 
     if (ctx.hookEventName === "PostToolUse") {
-      toolInput.tool_response = ctx.toolResponse;
+      // Add .result alias from .content[].text for Claude Code compatibility
+      const resp = (ctx.toolResponse ?? {}) as Record<string, unknown>;
+      if (Array.isArray(resp.content)) {
+        const text = (resp.content as Array<Record<string, unknown>>)
+          .map((c) => (typeof c.text === "string" ? c.text : ""))
+          .join("\n");
+        toolInput.tool_response = { ...resp, result: resp.result ?? text };
+      } else {
+        toolInput.tool_response = resp;
+      }
     }
 
     if (ctx.hookEventName === "PostToolUseFailure") {
