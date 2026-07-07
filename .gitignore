@@ -5,3 +5,6 @@
 node_modules
 
 dist
+
+# DOX framework (local agent docs, not for the published plugin)
+AGENTS.md
