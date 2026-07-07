@@ -7,7 +7,7 @@ import { registerStopHooks } from "./hooks/stop-hooks";
 import { registerToolHooks } from "./hooks/tool-hooks";
 
 // ============================================================================
-// 扩展主入口
+// Extension main entry point
 // ============================================================================
 
 export default function (pi: ExtensionAPI) {

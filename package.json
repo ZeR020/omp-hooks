@@ -34,8 +34,10 @@
   "scripts": {
     "prepublishOnly": "bun build src/omp-hooks.ts --target=bun --outdir=/tmp/omp-hooks-build-check"
   },
-  "exports": {
-    "./package.json": "./package.json"
+  "omp": {
+    "extensions": [
+      "./src/omp-hooks.ts"
+    ]
   },
   "pi": {
     "extensions": [
