@@ -173,17 +173,18 @@ export function matcherMatches(
   const values = [value, ...aliases];
 
   if (EXACT_MATCHER.test(trimmed)) {
+    const lowerValues = values.map((v) => v.toLowerCase());
     return trimmed
       .split(/[|,]/)
       .map((part) => part.trim())
       .filter(Boolean)
-      .some((part) => values.includes(part));
+      .some((part) => lowerValues.includes(part.toLowerCase()));
   }
 
   try {
     const regex = new RegExp(trimmed);
     return values.some((candidate) => regex.test(candidate));
   } catch {
-    return values.includes(trimmed);
+    return values.some((v) => v.toLowerCase() === trimmed.toLowerCase());
   }
 }
