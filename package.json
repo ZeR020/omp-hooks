@@ -1,0 +1,51 @@
+{
+  "name": "omp-hooks",
+  "version": "0.0.1",
+  "description": "Claude Code-compatible command hooks for the OMP (Oh My Pi) coding agent",
+  "type": "module",
+  "keywords": [
+    "omp",
+    "oh-my-pi",
+    "omp-package",
+    "extension",
+    "hooks",
+    "command-hooks",
+    "claude-code",
+    "claude-code-hooks"
+  ],
+  "license": "MIT",
+  "author": "ZeR020",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZeR020/omp-hooks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZeR020/omp-hooks/issues"
+  },
+  "homepage": "https://github.com/ZeR020/omp-hooks#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepublishOnly": "bun build src/omp-hooks.ts --target=bun --outdir=/tmp/omp-hooks-build-check"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "pi": {
+    "extensions": [
+      "./src/omp-hooks.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

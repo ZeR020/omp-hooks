@@ -1,0 +1,6 @@
+# Development artifacts
+.claude
+
+.omp
+node_modules
+
