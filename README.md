@@ -54,7 +54,7 @@ omp install git:github.com/ZeR020/omp-hooks
 Paste this into your OMP session:
 
 ```
-Install omp-hooks from npm using omp install omp-hooks and then help me set up a basic hook in ~/.omp/agent/settings.json
+Install the omp-hooks plugin from https://github.com/ZeR020/omp-hooks (run `omp install git:github.com/ZeR020/omp-hooks`) and then help me set up a basic hook in ~/.omp/agent/settings.json
 ```
 
 Your agent will run the install command and walk you through configuring your first hook.
