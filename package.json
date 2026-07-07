@@ -1,6 +1,6 @@
 {
   "name": "omp-hooks",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Claude Code-compatible command hooks for the OMP (Oh My Pi) coding agent",
   "type": "module",
   "keywords": [
