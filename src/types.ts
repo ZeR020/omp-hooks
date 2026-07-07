@@ -11,9 +11,12 @@ export type CompactTrigger = "manual" | "auto";
 export type Hook = {
   type: "command";
   command: string;
+  args?: string[];
   if?: string;
   timeout?: number;
+  shell?: "bash" | "powershell";
   async?: boolean;
+  asyncRewake?: boolean;
 };
 
 export type HookGroup = {
@@ -88,6 +91,12 @@ export interface HookExecutionContext {
   toolResponse?: Record<string, unknown>;
   error?: string;
   isInterrupt?: boolean;
+  // Async command hooks can deliver additionalContext after the foreground event.
+  asyncContextSink?: (
+    content: string,
+    details: Record<string, unknown>,
+    triggerTurn?: boolean,
+  ) => void;
 }
 
 // ============================================================================

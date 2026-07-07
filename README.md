@@ -26,12 +26,12 @@ omp-hooks bridges that gap. It reads Claude Code's hooks config format and wires
 
 ## Features
 
-- **9 Claude Code hook events mapped** — SessionStart, SessionEnd, PreCompact, PostCompact, PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, Stop
+- **9 Claude Code command-hook events mapped** — SessionStart, SessionEnd, PreCompact, PostCompact, PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, Stop
 - **Hidden context injection** — hook command output is injected into the LLM via `sendMessage({ display: false })`, the mechanism OMP's native `tool_call` lacks
-- **Claude Code config compatibility** — uses the same `settings.json` hooks format, so existing Claude Code hook scripts work with minimal changes
+- **Claude Code command config compatibility** — supports shell form (`command`) and exec form (`command` + `args`), `timeout`, `async`, `asyncRewake`, `shell`, and tool-event `if`
 - **Settings from `~/.omp/agent/settings.json`** — env-overridable via `OMP_HOOKS_SETTINGS`, plus project-local `<cwd>/.omp/settings.json` (merged)
 - **Debounce buffer** — parallel `grep`/`glob` calls are collapsed into one combined injection (50ms window) to avoid tripping OMP's stale-guard
-- **Bridge-script compatible** — spawns hook commands via `bash -c` with JSON on stdin, parses `additionalContext` from stdout, exit-code semantics (2=block, 0+JSON=inject, non-0/non-2=notify)
+- **Claude-style tool names** — OMP tool names such as `bash`/`write` are exposed to hook scripts and matchers as `Bash`/`Write`, while existing lowercase matchers still work
 
 ## Installation
 
@@ -98,8 +98,17 @@ Restart OMP (or run `/reload`), then send a message — when the agent finishes 
 
 ## Current Support
 
-- Only `type: "command"` is supported
-- Supports the `if` field on individual hook handlers for tool events only
+omp-hooks supports the command-hook subset of Claude Code hooks:
+
+- Supported handler type: `type: "command"`
+- Supported command fields:
+  - `command`
+  - `args`
+  - `timeout`
+  - `shell`
+  - `async`
+  - `asyncRewake`
+  - `if` on tool events only
 - Supported events:
   - `SessionStart`
   - `SessionEnd`
@@ -110,13 +119,13 @@ Restart OMP (or run `/reload`), then send a message — when the agent finishes 
   - `PostToolUseFailure`
   - `UserPromptSubmit`
   - `Stop`
-- Not supported: `http`, `prompt`, `agent`
+- Not supported yet: handler types `http`, `prompt`, `agent`, `mcp_tool`
+- Not supported yet: Claude events outside the list above, including `PostToolBatch`, `PermissionRequest`, `PermissionDenied`, `Notification`, `MessageDisplay`, `SubagentStart`, `SubagentStop`, and `StopFailure`
 
 ## Event Mapping
 
-- `SessionStart.startup` → `session_start(reason="startup")`
-- `SessionStart.startup` → `session_start(reason="new")`
-- `SessionStart.resume` → `session_start(reason="resume")`
+- `SessionStart.startup` → `session_start`
+- `SessionStart.resume` → `session_before_switch(reason="resume")`
 - `SessionStart.compact` → `session_compact`
 - `SessionEnd.other` → `session_shutdown`
 - `Stop` → `agent_end` (best-effort emulation of Claude Code's “after response completes” behavior)
@@ -173,14 +182,14 @@ Configure hooks in `~/.omp/agent/settings.json` or `.omp/settings.json`:
 
 ## `matcher` Behavior
 
-To stay aligned with Claude Code, `matcher` is a **single regex string**.
+`matcher` follows Claude Code's current exact/list/regex behavior:
 
 - Omitted `matcher` means match everything
 - `""` means match everything
 - `"*"` means match everything
-- Any other value is treated as a regular expression
-- If the regex is invalid, it falls back to exact string matching
-
+- Plain names are exact matches, for example `"Bash"`
+- Pipe or comma lists are exact alternatives, for example `"Edit|Write"` or `"Edit, Write"`
+- Values with regex syntax are treated as JavaScript regexes, for example `"mcp__.*"`
 Example:
 
 ```json
@@ -188,7 +197,7 @@ Example:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "bash",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
@@ -197,7 +206,7 @@ Example:
         ]
       },
       {
-        "matcher": "write|edit",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
@@ -228,19 +237,18 @@ Matches `reason`:
 
 ### PreToolUse / PostToolUse / PostToolUseFailure
 
-Matches `tool_name`.
+Matches Claude-style `tool_name`. OMP raw tool names are normalized for Claude Code config compatibility:
 
-Note: this uses Pi's raw tool names directly, so names are usually lowercase, for example:
+- OMP `bash` → Claude `Bash`
+- OMP `read` → Claude `Read`
+- OMP `write` → Claude `Write`
+- OMP `edit` → Claude `Edit`
+- OMP `grep` → Claude `Grep`
+- OMP `glob` → Claude `Glob`
+- OMP `ls` → Claude `LS`
+- OMP `mcp__...` names remain unchanged
 
-- `bash`
-- `read`
-- `write`
-- `edit`
-- `grep`
-- `find`
-- `ls`
-- `mcp__.*`
-
+Existing lowercase matchers such as `"bash"` still work.
 Notes:
 
 - `SessionEnd` is triggered from `session_shutdown`
@@ -281,7 +289,7 @@ Example: block only `git push`
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "bash",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
@@ -295,13 +303,27 @@ Example: block only `git push`
 }
 ```
 
+## Command Handler Fields
+
+Supported `type: "command"` fields:
+
+| Field | Status | Notes |
+| --- | --- | --- |
+| `command` | supported | Shell form by default; run through `bash -c` unless `args` is present. |
+| `args` | supported | Exec form; `command` is spawned directly with `args` and no shell. |
+| `timeout` | supported | Seconds. Defaults to 600 seconds for command hooks, 30 seconds for `UserPromptSubmit`, and 1.5 seconds for `SessionEnd`. |
+| `shell` | supported | `"bash"` by default; `"powershell"` runs `powershell -NoProfile -Command ...`. Ignored when `args` is present. |
+| `async` | supported | Runs in the background; decision/blocking fields are ignored because the triggering event has already continued. JSON `additionalContext` is injected when the process exits. |
+| `asyncRewake` | supported | Implies async; exit code 2 injects stderr/stdout as a hidden reminder and asks OMP to start another turn. |
+| `if` | supported for tool events | `ToolName(pattern)` with case-insensitive tool name and `*` wildcard matching against the primary tool input field. |
+
 ## Hook Input
 
 Input fields are designed to be as close as possible to Claude Code hooks:
 
 - Common fields: `session_id`, `transcript_path`, `cwd`, `hook_event_name`
 - Event-specific fields such as `source`, `reason`, `tool_name`, `tool_input`, `tool_response`
-- **Pi-specific extra fields may also be included**, but they should not break Claude Code-style scripts
+- **OMP-specific extra fields may also be included**, but they should not break Claude Code-style scripts
 
 ### SessionStart
 
@@ -377,7 +399,7 @@ Mapped from Pi's `tool_call` event.
   "transcript_path": "/path/to/session.jsonl",
   "cwd": "/current/working/directory",
   "hook_event_name": "PreToolUse",
-  "tool_name": "bash",
+  "tool_name": "Bash",
   "tool_input": {
     "command": "ls -la"
   },
@@ -391,7 +413,7 @@ Notes:
 - It maps to Pi's `tool_call`, not `tool_execution_start`
 - `matcher` is supported and is applied to `tool_name`
 - `permission_mode` is not included
-- `tool_name` uses Pi's original event value without case conversion
+- `tool_name` is normalized to Claude-style names such as `Bash`, while lowercase matchers such as `bash` still work
 - `tool_input` comes from `tool_call.event.input`
 - `tool_use_id` comes from `tool_call.event.toolCallId`
 
@@ -405,7 +427,7 @@ Mapped from Pi's `tool_result` event and only fired when the tool succeeds.
   "transcript_path": "/path/to/session.jsonl",
   "cwd": "/current/working/directory",
   "hook_event_name": "PostToolUse",
-  "tool_name": "bash",
+  "tool_name": "Bash",
   "tool_input": {
     "command": "pwd"
   },
@@ -429,7 +451,7 @@ Notes:
 - `PostToolUse` runs after successful tool execution
 - It maps to Pi's `tool_result`
 - `permission_mode` is not included
-- `tool_name` uses Pi's original event value without case conversion
+- `tool_name` is normalized to Claude-style names such as `Bash`, while lowercase matchers such as `bash` still work
 - `tool_input` comes from `tool_result.event.input`
 - `tool_response` is the Claude Code-style compatible tool result object
 - `tool_use_id` comes from `tool_result.event.toolCallId`

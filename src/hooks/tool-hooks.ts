@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { getHookGroups, matcherMatches } from "../config";
+import { getHookGroups, matcherMatches, toClaudeToolName } from "../config";
 import { extractErrorFromContent } from "../helpers";
 import type { HookModuleContext } from "../hook-context";
 import type {
@@ -26,9 +26,10 @@ export async function triggerPreToolUseHooks(
   const groups = getHookGroups(settings, "PreToolUse");
   const result: PreToolUseResult = { blocked: false };
 
-  for (const group of groups) {
-    if (!matcherMatches(group.matcher, toolName)) continue;
+  const claudeToolName = toClaudeToolName(toolName);
 
+  for (const group of groups) {
+    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
     for (const hook of group.hooks ?? []) {
       if (hook.if && !hookIfMatches(context, hook.if)) continue;
 
@@ -113,9 +114,10 @@ export async function triggerPostToolUseHooks(
   const groups = getHookGroups(settings, "PostToolUse");
   const result: PostToolUseResult = {};
 
-  for (const group of groups) {
-    if (!matcherMatches(group.matcher, toolName)) continue;
+  const claudeToolName = toClaudeToolName(toolName);
 
+  for (const group of groups) {
+    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
     for (const hook of group.hooks ?? []) {
       if (hook.if && !hookIfMatches(context, hook.if)) continue;
 
@@ -179,8 +181,10 @@ export async function triggerPostToolUseFailureHooks(
   const groups = getHookGroups(settings, "PostToolUseFailure");
   const result: PostToolUseResult = {};
 
+  const claudeToolName = toClaudeToolName(toolName);
+
   for (const group of groups) {
-    if (!matcherMatches(group.matcher, toolName)) continue;
+    if (!matcherMatches(group.matcher, claudeToolName, [toolName])) continue;
 
     for (const hook of group.hooks ?? []) {
       if (hook.if && !hookIfMatches(context, hook.if)) continue;
@@ -251,6 +255,8 @@ export function registerToolHooks(pi: ExtensionAPI, shared: HookModuleContext) {
         toolName: event.toolName,
         toolInput: event.input as Record<string, unknown>,
         toolUseId: event.toolCallId,
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),
@@ -293,6 +299,8 @@ export function registerToolHooks(pi: ExtensionAPI, shared: HookModuleContext) {
           toolUseId: event.toolCallId,
           error: extractErrorFromContent(event.content),
           isInterrupt: false,
+          asyncContextSink: (content, details, triggerTurn) =>
+            shared.injectHiddenContext(content, details, triggerTurn),
         },
         shared.currentSettings,
         (msg, type) => shared.notify(ctx, msg, type),
@@ -336,6 +344,8 @@ export function registerToolHooks(pi: ExtensionAPI, shared: HookModuleContext) {
         toolInput: event.input as Record<string, unknown>,
         toolUseId: event.toolCallId,
         toolResponse: shared.buildToolResponse(event),
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),

@@ -32,6 +32,31 @@ const HOOK_KEYS: Array<keyof HooksConfig> = [
   "stop",
 ];
 
+const CLAUDE_TOOL_NAMES: Record<string, string> = {
+  bash: "Bash",
+  bashoutput: "BashOutput",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  killbash: "KillBash",
+  ls: "LS",
+  multiedit: "MultiEdit",
+  notebookedit: "NotebookEdit",
+  read: "Read",
+  task: "Task",
+  todowrite: "TodoWrite",
+  webfetch: "WebFetch",
+  websearch: "WebSearch",
+  write: "Write",
+};
+
+const EXACT_MATCHER = /^[\w\s,|-]+$/;
+
+export function toClaudeToolName(toolName: string): string {
+  const key = toolName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return CLAUDE_TOOL_NAMES[key] ?? toolName;
+}
+
 export function readSettingsFile(settingsPath: string): SettingsFile | undefined {
   if (!existsSync(settingsPath)) {
     return undefined;
@@ -133,21 +158,32 @@ export function getHookGroups(
 }
 
 /**
- * 检查 matcher 是否匹配给定的值。
- *
- * 与 Claude Code 保持一致：matcher 是单个正则字符串。
- * `undefined`、`""`、`"*"` 都表示匹配全部。
+ * Match Claude Code matcher semantics:
+ * omitted / "" / "*" match all; plain names and comma/pipe-separated lists are
+ * exact matches; anything with regex syntax is treated as a JavaScript regex.
  */
 export function matcherMatches(
   matcher: string | undefined,
   value: string,
+  aliases: string[] = [],
 ): boolean {
-  if (!matcher || matcher === "" || matcher === "*") return true;
+  const trimmed = matcher?.trim();
+  if (!trimmed || trimmed === "*") return true;
+
+  const values = [value, ...aliases];
+
+  if (EXACT_MATCHER.test(trimmed)) {
+    return trimmed
+      .split(/[|,]/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .some((part) => values.includes(part));
+  }
 
   try {
-    const regex = new RegExp(matcher);
-    return regex.test(value);
+    const regex = new RegExp(trimmed);
+    return values.some((candidate) => regex.test(candidate));
   } catch {
-    return matcher === value;
+    return values.includes(trimmed);
   }
 }

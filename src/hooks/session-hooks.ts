@@ -54,6 +54,8 @@ export function registerSessionHooks(
         cwd: ctx.cwd,
         hookEventName: "SessionEnd",
         reason,
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),

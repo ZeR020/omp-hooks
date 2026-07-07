@@ -29,6 +29,8 @@ export function registerCompactHooks(pi: ExtensionAPI, shared: HookModuleContext
         trigger,
         customInstructions: event.customInstructions ?? "",
         transcriptPath: ctx.sessionManager.getSessionFile(),
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),
@@ -47,6 +49,8 @@ export function registerCompactHooks(pi: ExtensionAPI, shared: HookModuleContext
         trigger,
         compactSummary: event.compactionEntry.summary,
         transcriptPath: ctx.sessionManager.getSessionFile(),
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),

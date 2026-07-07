@@ -95,6 +95,8 @@ export function registerPromptHooks(
         hookEventName: "UserPromptSubmit",
         transcriptPath: ctx.sessionManager.getSessionFile(),
         prompt: event.text,
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),

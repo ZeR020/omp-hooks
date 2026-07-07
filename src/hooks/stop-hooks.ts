@@ -107,6 +107,8 @@ export function registerStopHooks(pi: ExtensionAPI, shared: HookModuleContext) {
         transcriptPath: ctx.sessionManager.getSessionFile(),
         stopHookActive: shared.stopHookActive,
         lastAssistantMessage: findLastAssistantMessageText(event.messages),
+        asyncContextSink: (content, details, triggerTurn) =>
+          shared.injectHiddenContext(content, details, triggerTurn),
       },
       shared.currentSettings,
       (msg, type) => shared.notify(ctx, msg, type),

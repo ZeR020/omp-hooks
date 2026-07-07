@@ -26,6 +26,7 @@ export type HookModuleContext = {
   injectHiddenContext: (
     content: string,
     details: Record<string, unknown>,
+    triggerTurn?: boolean,
   ) => void;
   initSettings: (cwd: string) => SettingsFile | undefined;
   buildToolResponse: (event: {
@@ -50,7 +51,7 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
       ctx.sessionManager.getSessionFile() ?? "ephemeral",
     notify: (ctx: any, msg: string, type: NotifyType) =>
       ctx.ui.notify(msg, type),
-    injectHiddenContext: (content, details) => {
+    injectHiddenContext: (content, details, triggerTurn = false) => {
       // 50ms debounce — parallel grep/glob calls trigger concurrent sendMessage
       // calls that trip OMP's stale-guard (pending parallel tool calls skipped
       // with "Skipped due to queued user message"). Collapses a burst of parallel
@@ -60,12 +61,15 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
       clearTimeout(_injectBuffer.timer);
       _injectBuffer.timer = setTimeout(() => {
         const combined = _injectBuffer.content.join("\n\n");
-        shared.pi.sendMessage({
-          customType: "omp-hooks",
-          content: combined,
-          display: false,
-          details: _injectBuffer.details,
-        });
+        shared.pi.sendMessage(
+          {
+            customType: "omp-hooks",
+            content: combined,
+            display: false,
+            details: _injectBuffer.details,
+          },
+          triggerTurn ? { triggerTurn: true } : undefined,
+        );
         _injectBuffer.content = [];
         _injectBuffer.details = {};
         _injectBuffer.timer = undefined;
@@ -109,6 +113,8 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
           cwd: ctx.cwd,
           hookEventName: "SessionStart",
           source: matcher,
+          asyncContextSink: (content, details, triggerTurn) =>
+            shared.injectHiddenContext(content, details, triggerTurn),
         },
         shared.currentSettings,
         (msg, type) => shared.notify(ctx, msg, type),
