@@ -3,6 +3,7 @@
 # omp-hooks
 
 [![npm version](https://img.shields.io/npm/v/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
+[![npm downloads](https://img.shields.io/npm/dm/omp-hooks?style=flat-square)](https://www.npmjs.com/package/omp-hooks)
 [![CI](https://img.shields.io/github/actions/workflow/status/ZeR020/omp-hooks/ci.yml?branch=main&style=flat-square)](https://github.com/ZeR020/omp-hooks/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/ZeR020/omp-hooks?style=flat-square)](https://github.com/ZeR020/omp-hooks/blob/main/LICENSE)
 
