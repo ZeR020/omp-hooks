@@ -53,9 +53,11 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
       ctx.ui.notify(msg, type),
     injectHiddenContext: (content, details, triggerTurn = false) => {
       // 50ms debounce — parallel grep/glob calls trigger concurrent sendMessage
-      // calls that trip OMP's stale-guard (pending parallel tool calls skipped
-      // with "Skipped due to queued user message"). Collapses a burst of parallel
-      // injections into one combined sendMessage after the burst settles.
+      // calls. Collapses a burst of parallel injections into one combined
+      // sendMessage after the burst settles. Uses deliverAs: "nextTurn" so
+      // context queues for the next turn instead of calling agent.steer(),
+      // which would interrupt in-flight tools with "Skipped due to pending
+      // system advisory" (OMP's stale-guard, agent-loop.ts:2351).
       _injectBuffer.content.push(content);
       if (details) Object.assign(_injectBuffer.details, details);
       clearTimeout(_injectBuffer.timer);
@@ -68,7 +70,7 @@ export function createHookContext(pi: ExtensionAPI): HookModuleContext {
             display: false,
             details: _injectBuffer.details,
           },
-          triggerTurn ? { triggerTurn: true } : undefined,
+          triggerTurn ? { triggerTurn: true } : { deliverAs: "nextTurn" },
         );
         _injectBuffer.content = [];
         _injectBuffer.details = {};
